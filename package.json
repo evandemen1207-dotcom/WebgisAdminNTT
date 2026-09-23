@@ -1,0 +1,17 @@
+{
+  "name": "webgis-admin-ntt",
+  "version": "1.0.0",
+  "description": "WebGIS Batas Administrasi Kabupaten/Kota Provinsi NTT",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "dev": "node server.js",
+    "build": "echo 'Build complete'",
+    "lint": "node -c resources/app.js server.js",
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "compression": "^1.7.5",
+    "express": "^4.21.2"
+  }
+}

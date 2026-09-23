@@ -1,0 +1,7 @@
+{
+  "name": "WEBGIS Batas Admin NTT",
+  "description": "WebGIS Batas Administrasi Kabupaten/Kota Provinsi NTT interaktif berbasis OpenLayers",
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
