@@ -56,6 +56,9 @@
     <link rel="stylesheet" href="./resources/fontawesome-all.min.css">
     <link rel="stylesheet" href="./resources/ol.css">
 
+    <!-- Chart.js for interactive statistics bar chart -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -184,6 +187,13 @@
                 </div>
             </div>
 
+            <!-- Weather Map Layer Toggle -->
+            <button id="btn-toggle-weather-map" onclick="toggleWeatherMapLayer()" class="h-8 px-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700/80 text-xs font-medium flex items-center gap-1.5 transition" title="Tampilkan / Sembunyikan Label Prakiraan Cuaca di Atas Peta">
+                <i class="fas fa-cloud-sun text-amber-400 text-xs"></i>
+                <span class="hidden sm:inline">Cuaca NTT</span>
+                <span id="weather-badge-status-dot" class="w-2 h-2 rounded-full bg-slate-500"></span>
+            </button>
+
             <!-- Export Map PNG -->
             <button onclick="exportMapImage()" class="h-8 px-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700/80 text-xs font-medium flex items-center gap-1.5 transition" title="Cetak / Ekspor Peta PNG">
                 <i class="fas fa-camera text-teal-400 text-xs"></i>
@@ -226,6 +236,10 @@
                 <button data-tab="tools" class="sidebar-tab-btn flex-1 py-2.5 px-1 text-[11px] font-semibold rounded-t-lg border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center justify-center gap-1 transition whitespace-nowrap" title="Alat Swipe Citra & Animasi Angin">
                     <i class="fas fa-sliders-h text-xs text-sky-400"></i>
                     <span>Alat & Angin</span>
+                </button>
+                <button data-tab="weather" class="sidebar-tab-btn flex-1 py-2.5 px-1 text-[11px] font-semibold rounded-t-lg border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center justify-center gap-1 transition whitespace-nowrap" title="Prakiraan Cuaca Terkini NTT">
+                    <i class="fas fa-cloud-sun text-xs text-amber-400"></i>
+                    <span>Cuaca</span>
                 </button>
                 <button data-tab="stats" class="sidebar-tab-btn flex-1 py-2.5 px-1 text-[11px] font-semibold rounded-t-lg border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center justify-center gap-1 transition whitespace-nowrap">
                     <i class="fas fa-chart-pie text-xs"></i>
@@ -598,12 +612,113 @@
 
             </div>
 
+            <!-- Tab Content: Live Weather Forecast (Cuaca Terkini) -->
+            <div id="tab-panel-weather" class="tab-content-panel flex-1 overflow-y-auto p-4 space-y-4 hidden">
+                <!-- Header Banner -->
+                <div class="flex items-center justify-between pb-2 border-b border-slate-800">
+                    <div class="flex items-center gap-2">
+                        <div class="w-8 h-8 rounded-xl bg-gradient-to-tr from-amber-500 to-orange-400 text-slate-950 flex items-center justify-center font-bold shadow-md shadow-amber-500/20">
+                            <i class="fas fa-cloud-sun text-sm"></i>
+                        </div>
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <h3 class="text-xs font-bold uppercase tracking-wider text-white">Cuaca Terkini NTT</h3>
+                                <span class="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-semibold font-mono">LIVE API</span>
+                            </div>
+                            <p class="text-[10px] text-slate-400">Open-Meteo & BMKG Geospatial Grid</p>
+                        </div>
+                    </div>
+                    <button onclick="refreshWeatherData(true)" class="px-2 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-sky-400 hover:text-sky-300 border border-slate-700 text-xs font-medium flex items-center gap-1.5 transition" title="Muat Ulang Data Cuaca">
+                        <i id="weather-refresh-icon" class="fas fa-sync-alt text-[10px]"></i>
+                        <span class="text-[11px]">Segarkan</span>
+                    </button>
+                </div>
+
+                <!-- Map Overlay Toggle & Settings -->
+                <div class="p-3.5 bg-slate-800/60 border border-slate-700/70 rounded-2xl space-y-3">
+                    <label class="flex items-center justify-between cursor-pointer">
+                        <div>
+                            <span class="text-xs font-semibold text-slate-100 block">Pin Cuaca di Peta</span>
+                            <span class="text-[10px] text-slate-400">Tampilkan label suhu & cuaca di setiap ibu kota</span>
+                        </div>
+                        <input id="toggle-weather-map-check" type="checkbox" onchange="toggleWeatherMapLayer(this.checked)" class="w-4 h-4 rounded text-amber-500 focus:ring-amber-500 bg-slate-900 border-slate-700 cursor-pointer">
+                    </label>
+
+                    <div class="pt-2 border-t border-slate-700/60 flex items-center justify-between text-xs">
+                        <span class="text-slate-400 text-[11px]">Format Label Pin:</span>
+                        <select id="weather-label-mode-select" onchange="onWeatherLabelModeChange(this.value)" class="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-[11px] text-slate-200 focus:outline-none focus:border-amber-500">
+                            <option value="temp_icon" selected>Ikon + Suhu (°C)</option>
+                            <option value="temp_only">Suhu Saja (°C)</option>
+                            <option value="detailed">Lengkap (+ Angin)</option>
+                        </select>
+                    </div>
+
+                    <div class="text-[10px] text-slate-400 flex items-center justify-between font-mono pt-1">
+                        <span>Pembaruan Terakhir:</span>
+                        <span id="weather-last-updated-text" class="text-slate-300">Memuat...</span>
+                    </div>
+                </div>
+
+                <!-- Regional Weather Overview Snapshot -->
+                <div id="weather-overview-container" class="grid grid-cols-2 gap-2 text-xs">
+                    <!-- Populated dynamically -->
+                </div>
+
+                <!-- Weather Zone Filter & Search -->
+                <div class="space-y-2">
+                    <div class="relative">
+                        <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
+                        <input id="weather-search-input" type="text" placeholder="Cari cuaca kabupaten..." class="w-full bg-slate-950 border border-slate-700/80 rounded-xl pl-9 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 transition">
+                    </div>
+
+                    <div class="flex items-center gap-1 overflow-x-auto pb-1 text-[11px] no-scrollbar">
+                        <button data-wzone="all" class="weather-zone-btn px-2.5 py-1 rounded-lg bg-amber-500 text-slate-950 font-bold whitespace-nowrap transition">Semua</button>
+                        <button data-wzone="flores" class="weather-zone-btn px-2.5 py-1 rounded-lg bg-slate-800 text-slate-400 hover:text-white whitespace-nowrap transition">Flores</button>
+                        <button data-wzone="timor" class="weather-zone-btn px-2.5 py-1 rounded-lg bg-slate-800 text-slate-400 hover:text-white whitespace-nowrap transition">Timor</button>
+                        <button data-wzone="sumba" class="weather-zone-btn px-2.5 py-1 rounded-lg bg-slate-800 text-slate-400 hover:text-white whitespace-nowrap transition">Sumba</button>
+                        <button data-wzone="alor_rote_sabu" class="weather-zone-btn px-2.5 py-1 rounded-lg bg-slate-800 text-slate-400 hover:text-white whitespace-nowrap transition">Alor, Rote & Sabu</button>
+                    </div>
+                </div>
+
+                <!-- 22 Regencies Weather Cards List -->
+                <div id="weather-cards-list" class="space-y-2">
+                    <!-- Populated dynamically -->
+                </div>
+            </div>
+
             <!-- Tab Content 5: Statistics -->
             <div id="tab-panel-stats" class="tab-content-panel flex-1 overflow-y-auto p-4 space-y-4 hidden">
                 <div id="statistics-container">
                     <!-- Populated dynamically by app.js -->
                 </div>
             </div>
+
+            <!-- Sidebar Sticky Bottom Footer (Identitas & Branding) -->
+            <footer id="sidebar-footer" class="shrink-0 mt-auto border-t border-slate-800/80 bg-[#0b1329] backdrop-blur-md flex items-center gap-3 p-3 select-none transition-colors duration-200">
+                <!-- 1. Ikon Profil (Kiri) -->
+                <div class="rounded-lg bg-slate-800/80 border border-cyan-500/40 p-2 relative flex items-center justify-center shrink-0 shadow-sm shadow-cyan-500/10">
+                    <i class="fas fa-compass text-base text-cyan-400"></i>
+                    <!-- Indikator Status: Hijau neon di sudut kanan atas bingkai -->
+                    <span class="absolute -top-1 -right-1 w-2.5 h-2.5 bg-emerald-400 rounded-full ring-2 ring-[#0b1329] shadow-sm shadow-emerald-400/50" title="Status Aktif"></span>
+                </div>
+
+                <!-- 2. Informasi Pengguna (Tengah/Kanan) -->
+                <div class="min-w-0 flex-1">
+                    <!-- Baris Atas: Nama Utama + Chip/Badge Email -->
+                    <div class="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                        <span class="font-bold text-white text-sm tracking-wide shrink-0">Evan</span>
+                        <a href="mailto:dermanevan@gmail.com" class="bg-slate-800/90 border border-slate-700/80 hover:border-cyan-500/50 hover:bg-slate-800 px-2 py-0.5 rounded-md flex items-center gap-1.5 transition-colors group max-w-full" title="Kirim email ke dermanevan@gmail.com">
+                            <i class="fas fa-envelope text-[11px] text-cyan-400 shrink-0"></i>
+                            <span class="text-xs text-slate-300 font-mono group-hover:text-cyan-300 transition-colors truncate">dermanevan@gmail.com</span>
+                        </a>
+                    </div>
+
+                    <!-- Baris Bawah: Teks Branding & Hak Cipta -->
+                    <p class="text-[11px] text-slate-400 font-sans tracking-wide mt-1 truncate hover:text-slate-300 transition-colors">
+                        Karsa Nusa 2026 • All Rights Reserved
+                    </p>
+                </div>
+            </footer>
         </aside>
 
         <!-- Map Container & Canvas -->
@@ -671,6 +786,21 @@
                 </button>
             </div>
 
+            <!-- Floating Weather Summary Pill on Map -->
+            <div id="map-weather-chip" class="absolute top-16 left-4 z-10 hidden sm:flex items-center gap-2 bg-slate-900/90 border border-slate-700/80 rounded-2xl px-3 py-1.5 shadow-xl backdrop-blur text-xs pointer-events-auto cursor-pointer hover:border-amber-500/60 transition" onclick="openWeatherTab()" title="Klik untuk membuka panel cuaca lengkap">
+                <div class="flex items-center gap-1.5">
+                    <span id="map-weather-chip-icon" class="text-base">🌤️</span>
+                    <div>
+                        <div class="text-[11px] font-bold text-white leading-none flex items-center gap-1">
+                            <span>Cuaca NTT:</span>
+                            <span id="map-weather-chip-temp" class="text-amber-400 font-mono">27.8°C</span>
+                        </div>
+                        <span id="map-weather-chip-cond" class="text-[9px] text-slate-400 block mt-0.5">Cerah Berawan · Angin 18 km/j</span>
+                    </div>
+                </div>
+                <span class="text-[10px] text-amber-400 hover:text-amber-300 font-semibold pl-1.5 border-l border-slate-700/60">Detail &rsaquo;</span>
+            </div>
+
             <!-- Floating Measurement Active Banner -->
             <div id="measure-banner" class="absolute top-4 left-1/2 -translate-x-1/2 bg-slate-900/90 border border-sky-500/50 rounded-2xl px-4 py-2.5 shadow-2xl backdrop-blur flex items-center gap-4 z-10 hidden">
                 <div class="flex items-center gap-2">
@@ -727,91 +857,259 @@
     </div>
 
     <!-- Feature Detail Drawer / Modal -->
-    <div id="feature-detail-modal" class="fixed bottom-10 right-4 md:right-6 w-full max-w-md bg-slate-900/95 border border-slate-700/80 rounded-2xl shadow-2xl shadow-black/50 z-40 backdrop-blur overflow-hidden transition-all duration-300 hidden">
+    <div id="feature-detail-modal" class="fixed bottom-2.5 sm:bottom-10 left-2.5 right-2.5 sm:left-auto sm:right-6 sm:w-96 md:w-[400px] max-w-[calc(100vw-1.25rem)] bg-slate-900/95 border border-slate-700/80 rounded-2xl shadow-2xl shadow-black/70 z-40 backdrop-blur-md overflow-hidden flex flex-col max-h-[52vh] sm:max-h-[72vh] md:max-h-[78vh] transition-all duration-300 hidden">
         <!-- Colored accent banner -->
-        <div id="modal-region-color-bar" class="h-2 w-full bg-sky-500"></div>
+        <div id="modal-region-color-bar" class="h-1.5 w-full bg-sky-500 shrink-0"></div>
+
+        <!-- Mobile Touch Handle (Tap to Toggle Minimize/Expand) -->
+        <div class="sm:hidden w-10 h-1 bg-slate-700/80 rounded-full mx-auto mt-1.5 -mb-0.5 shrink-0 cursor-pointer" onclick="toggleModalExpand()" title="Ketuk untuk ciutkan/perluas"></div>
         
-        <div class="p-4 md:p-5 space-y-3.5">
+        <!-- Pinned Header -->
+        <div class="px-3.5 py-2 sm:px-4 sm:py-2.5 border-b border-slate-800/80 shrink-0 flex items-start justify-between gap-2.5">
+            <div class="min-w-0 flex-1 cursor-pointer" onclick="toggleModalExpand()" title="Klik untuk ciutkan/perluas">
+                <div class="flex items-center gap-1.5 text-[10px]">
+                    <span id="modal-region-type" class="uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30 text-[9px]">KABUPATEN OTONOM</span>
+                    <span class="text-slate-600">•</span>
+                    <span id="modal-region-island" class="text-slate-400 font-medium truncate">Pulau Flores</span>
+                </div>
+                <div class="flex items-baseline gap-2 mt-0.5">
+                    <h2 id="modal-region-name" class="text-base sm:text-lg font-extrabold text-white leading-tight truncate">Manggarai Barat</h2>
+                    <span id="modal-minimized-summary" class="hidden text-xs text-emerald-400 font-mono font-bold truncate">3.149 km²</span>
+                </div>
+            </div>
+            <div class="flex items-center gap-1 shrink-0 mt-0.5">
+                <!-- Minimize / Maximize Toggle Button -->
+                <button id="btn-toggle-modal-expand" onclick="toggleModalExpand()" class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition" title="Ciutkan / Perluas Kartu">
+                    <i id="icon-toggle-modal-expand" class="fas fa-chevron-down text-xs"></i>
+                </button>
+                <!-- Close Button -->
+                <button id="btn-close-modal" class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-rose-500/20 text-slate-400 hover:text-rose-300 flex items-center justify-center transition" title="Tutup">
+                    <i class="fas fa-times text-xs"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- In-Modal Quick Tabs Navigation -->
+        <div id="modal-expandable-content" class="flex-1 flex flex-col min-h-0 overflow-hidden">
+            <div class="px-3 sm:px-4 pt-1.5 pb-1 bg-slate-950/50 border-b border-slate-800/60 flex items-center gap-1 text-[11px] shrink-0">
+                <button id="btn-modal-tab-ringkasan" onclick="switchModalTab('ringkasan')" class="modal-tab-btn px-2.5 py-1 rounded-lg font-semibold transition text-sky-400 bg-sky-500/15 border border-sky-500/30 flex items-center gap-1.5">
+                    <i class="fas fa-chart-pie text-[10px]"></i> Ringkasan
+                </button>
+                <button id="btn-modal-tab-cuaca" onclick="switchModalTab('cuaca')" class="modal-tab-btn px-2.5 py-1 rounded-lg font-semibold transition text-slate-400 hover:text-slate-200 border border-transparent flex items-center gap-1.5">
+                    <i class="fas fa-cloud-sun text-amber-400 text-[10px]"></i> Cuaca
+                    <span id="modal-tab-temp-badge" class="font-mono text-[9px] px-1 rounded bg-slate-800 text-amber-300">--°</span>
+                </button>
+                <button id="btn-modal-tab-teknis" onclick="switchModalTab('teknis')" class="modal-tab-btn px-2.5 py-1 rounded-lg font-semibold transition text-slate-400 hover:text-slate-200 border border-transparent flex items-center gap-1.5">
+                    <i class="fas fa-layer-group text-teal-400 text-[10px]"></i> Spasial
+                </button>
+            </div>
+
+            <!-- Scrollable Body with Sleek Scrollbar -->
+            <div class="flex-1 overflow-y-auto p-3 sm:p-3.5 space-y-3 text-xs">
+                
+                <!-- TAB 1: RINGKASAN & POTENSI -->
+                <div id="modal-panel-ringkasan" class="space-y-2.5">
+                    <!-- Key Metric Badges -->
+                    <div class="grid grid-cols-2 gap-2 text-xs">
+                        <div class="p-2.5 bg-slate-800/70 border border-slate-700/60 rounded-xl">
+                            <span class="text-slate-400 text-[10px] block">Luas Wilayah</span>
+                            <span id="modal-area-km2" class="text-base font-bold font-mono text-emerald-400 mt-0.5 block leading-tight">3.149 km²</span>
+                            <span id="modal-area-ha" class="text-[10px] text-slate-500 block font-mono mt-0.5">314.900 Ha</span>
+                        </div>
+                        <div class="p-2.5 bg-slate-800/70 border border-slate-700/60 rounded-xl">
+                            <span class="text-slate-400 text-[10px] block">Ibu Kota Daerah</span>
+                            <span id="modal-ibukota" class="text-base font-bold text-white mt-0.5 block truncate leading-tight">Labuan Bajo</span>
+                            <span class="text-[10px] text-slate-500 block truncate mt-0.5">Pusat Pemerintahan</span>
+                        </div>
+                    </div>
+
+                    <!-- Spatial Insight: Proportion of Province -->
+                    <div class="p-2.5 bg-slate-950/70 border border-slate-800 rounded-xl space-y-1.5">
+                        <div class="flex justify-between items-center text-[11px]">
+                            <span class="text-slate-400 text-[10px]">Proporsi Luas Terhadap NTT:</span>
+                            <span id="modal-area-pct" class="font-bold text-sky-400 font-mono">6.8%</span>
+                        </div>
+                        <div class="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                            <div id="modal-area-bar" class="bg-gradient-to-r from-sky-500 to-teal-400 h-1.5 rounded-full transition-all duration-500" style="width: 7%"></div>
+                        </div>
+                        <div id="modal-area-compare" class="text-[10px] text-slate-400 flex items-center gap-1.5">
+                            <i class="fas fa-chart-pie text-sky-400 text-[9px]"></i>
+                            <span id="modal-area-compare-text" class="truncate">1.5x lebih besar dari rata-rata kabupaten di NTT</span>
+                        </div>
+                    </div>
+
+                    <!-- Iconic & Description -->
+                    <div class="p-2.5 bg-slate-800/40 border border-slate-700/50 rounded-xl space-y-1">
+                        <span class="text-slate-400 text-[10px] font-bold uppercase tracking-wider block">Potensi & Keunggulan Wilayah:</span>
+                        <p id="modal-ikonik" class="text-slate-200 font-medium leading-relaxed text-[11px]"></p>
+                        <p id="modal-deskripsi" class="text-slate-400 text-[10px] leading-relaxed pt-1 border-t border-slate-700/40"></p>
+                    </div>
+                </div>
+
+                <!-- TAB 2: LIVE WEATHER & FORECAST -->
+                <div id="modal-panel-cuaca" class="space-y-2.5 hidden">
+                    <div id="modal-weather-card" class="p-3 bg-gradient-to-r from-sky-950/60 via-slate-900 to-amber-950/40 border border-sky-500/40 rounded-xl space-y-2">
+                        <div class="flex items-center justify-between">
+                            <span class="text-[10px] font-bold text-sky-300 uppercase tracking-wider flex items-center gap-1.5">
+                                <i class="fas fa-cloud-sun text-amber-400"></i> Cuaca Terkini (<span id="modal-weather-capital">-</span>)
+                            </span>
+                            <span id="modal-weather-condition-badge" class="text-[9px] font-semibold px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-200 border border-sky-500/30">Cerah Berawan</span>
+                        </div>
+                        <div class="flex items-center justify-between pt-0.5">
+                            <div class="flex items-center gap-2.5">
+                                <span id="modal-weather-icon" class="text-2xl">🌤️</span>
+                                <div>
+                                    <div class="text-xl font-extrabold font-mono text-white leading-none"><span id="modal-weather-temp">28.5</span>°C</div>
+                                    <span class="text-[10px] text-slate-400">Terasa: <span id="modal-weather-feels">30</span>°C</span>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-3 gap-2 text-right font-mono text-[10px]">
+                                <div>
+                                    <span class="text-slate-400 block text-[9px]">Lembap</span>
+                                    <span id="modal-weather-humidity" class="text-sky-300 font-bold">75%</span>
+                                </div>
+                                <div>
+                                    <span class="text-slate-400 block text-[9px]">Angin</span>
+                                    <span id="modal-weather-wind" class="text-teal-300 font-bold">18 km/j</span>
+                                </div>
+                                <div>
+                                    <span class="text-slate-400 block text-[9px]">Hujan</span>
+                                    <span id="modal-weather-rain" class="text-emerald-300 font-bold">0 mm</span>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- 3-Day Mini Daily Forecast Strip -->
+                        <div id="modal-weather-forecast-strip" class="pt-2 border-t border-slate-800/80 grid grid-cols-3 gap-1.5 text-center text-[10px]">
+                            <!-- Populated dynamically -->
+                        </div>
+                    </div>
+                    
+                    <button onclick="openCurrentRegionFullWeather()" class="w-full py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold flex items-center justify-center gap-1.5 transition">
+                        <i class="fas fa-calendar-alt text-amber-400 text-xs"></i> Lihat Prakiraan 5 Hari & Stasiun Lengkap
+                    </button>
+                </div>
+
+                <!-- TAB 3: SPASIAL & TEKNIS -->
+                <div id="modal-panel-teknis" class="space-y-2 hidden">
+                    <div class="space-y-2 p-3 bg-slate-950/60 border border-slate-800 rounded-xl text-xs">
+                        <div class="flex justify-between items-center">
+                            <span class="text-slate-400 text-[11px]">Titik Koordinat:</span>
+                            <span id="modal-coords" class="font-mono text-slate-200 font-medium text-[11px]">-8.5744°, 119.8714°</span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-slate-400 text-[11px]">Dasar Penetapan:</span>
+                            <span id="modal-uupp" class="text-slate-300 truncate max-w-[180px] text-[11px]">Hasil Delineasi Batas Desa</span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-slate-400 text-[11px]">Sistem Referensi:</span>
+                            <span id="modal-srs" class="text-slate-300 text-[11px]">SRGI 2013</span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-slate-400 text-[11px]">Kode Metadata:</span>
+                            <span id="modal-meta" class="text-slate-400 font-mono text-[10px] truncate max-w-[180px]">TASWIL1000020221227</span>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Compact Pinned Action Buttons -->
+            <div class="p-2 sm:p-2.5 border-t border-slate-800/90 bg-slate-950/60 grid grid-cols-3 gap-1.5 shrink-0">
+                <a id="btn-gmaps" href="#" target="_blank" rel="noopener noreferrer" class="py-1.5 px-2 text-[11px] rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium flex items-center justify-center gap-1 transition" title="Buka di Google Maps">
+                    <i class="fas fa-external-link-alt text-[10px] text-sky-400"></i> Maps
+                </a>
+                <button id="btn-copy-coords" class="py-1.5 px-2 text-[11px] rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium flex items-center justify-center gap-1 transition" title="Salin Koordinat Centroid">
+                    <i class="fas fa-copy text-[10px] text-emerald-400"></i> Koordinat
+                </button>
+                <button id="btn-export-feature" class="py-1.5 px-2 text-[11px] rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-medium flex items-center justify-center gap-1 transition" title="Unduh GeoJSON Wilayah Ini">
+                    <i class="fas fa-download text-[10px]"></i> GeoJSON
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Comprehensive Weather Detail Modal -->
+    <div id="weather-detail-modal" class="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 hidden">
+        <div class="bg-slate-900 border border-slate-700/90 rounded-2xl w-full max-w-lg p-5 space-y-4 shadow-2xl overflow-hidden relative">
+            <div class="absolute top-0 inset-x-0 h-1.5 bg-gradient-to-r from-amber-400 via-sky-400 to-teal-400"></div>
+            
             <!-- Header -->
-            <div class="flex items-start justify-between gap-3">
+            <div class="flex items-start justify-between gap-3 pt-1">
                 <div>
                     <div class="flex items-center gap-2">
-                        <span id="modal-region-type" class="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30">KABUPATEN OTONOM</span>
-                        <span id="modal-region-island" class="text-[11px] text-slate-400 font-medium">Pulau Flores</span>
+                        <span id="wd-modal-badge" class="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">PRAKIRAAN CUACA</span>
+                        <span id="wd-modal-island" class="text-[11px] text-slate-400 font-medium">Pulau Flores</span>
                     </div>
-                    <h2 id="modal-region-name" class="text-xl font-extrabold text-white mt-1 leading-snug">Manggarai Barat</h2>
+                    <h3 id="wd-modal-name" class="text-xl font-extrabold text-white mt-1">Manggarai Barat</h3>
+                    <p class="text-xs text-slate-400">Ibu Kota & Stasiun Observasi: <span id="wd-modal-capital" class="text-slate-200 font-semibold">Labuan Bajo</span></p>
                 </div>
-                <button id="btn-close-modal" class="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition">
+                <button onclick="closeWeatherDetailModal()" class="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition">
                     <i class="fas fa-times text-xs"></i>
                 </button>
             </div>
 
-            <!-- Key Metric Badges -->
-            <div class="grid grid-cols-2 gap-2 text-xs">
-                <div class="p-2.5 bg-slate-800/70 border border-slate-700/60 rounded-xl">
-                    <span class="text-slate-400 text-[11px] block">Luas Wilayah</span>
-                    <span id="modal-area-km2" class="text-base font-bold font-mono text-emerald-400 mt-0.5 block">3.149 km²</span>
-                    <span id="modal-area-ha" class="text-[10px] text-slate-500 block">314.900 Ha</span>
+            <!-- Main Current Condition Hero Card -->
+            <div class="p-4 rounded-2xl bg-gradient-to-br from-slate-800/90 via-slate-900 to-sky-950/70 border border-slate-700/80 shadow-inner flex items-center justify-between">
+                <div class="flex items-center gap-4">
+                    <div id="wd-modal-icon-hero" class="text-4xl">🌤️</div>
+                    <div>
+                        <div class="flex items-baseline gap-1.5">
+                            <span id="wd-modal-temp-hero" class="text-3xl font-extrabold font-mono text-white">29.4</span>
+                            <span class="text-lg font-bold text-sky-400">°C</span>
+                        </div>
+                        <div id="wd-modal-desc-hero" class="text-xs font-semibold text-slate-200">Cerah Berawan</div>
+                        <div class="text-[10px] text-slate-400 mt-0.5">Suhu Terasa: <span id="wd-modal-feels-hero" class="font-mono text-slate-300">32°C</span></div>
+                    </div>
                 </div>
-                <div class="p-2.5 bg-slate-800/70 border border-slate-700/60 rounded-xl">
-                    <span class="text-slate-400 text-[11px] block">Ibu Kota Daerah</span>
-                    <span id="modal-ibukota" class="text-base font-bold text-white mt-0.5 block truncate">Labuan Bajo</span>
-                    <span class="text-[10px] text-slate-500 block">Pusat Pemerintahan</span>
+
+                <div class="text-right space-y-1 font-mono text-xs">
+                    <div class="text-slate-400 text-[11px]">Rentang Suhu Hari Ini</div>
+                    <div class="text-sm font-bold text-emerald-400">
+                        <span id="wd-modal-min-hero">23°C</span> - <span id="wd-modal-max-hero">33°C</span>
+                    </div>
+                    <div class="text-[10px] text-slate-400">Zona Waktu: <span class="text-sky-300 font-semibold">WITA (GMT+8)</span></div>
                 </div>
             </div>
 
-            <!-- Spatial Insight: Proportion of Province -->
-            <div class="p-2.5 bg-slate-950/70 border border-slate-800 rounded-xl space-y-1.5 text-xs">
-                <div class="flex justify-between items-center text-[11px]">
-                    <span class="text-slate-400">Proporsi Luas Terhadap NTT:</span>
-                    <span id="modal-area-pct" class="font-bold text-sky-400 font-mono">6.8%</span>
+            <!-- Atmospheric Metrics Grid -->
+            <div class="grid grid-cols-4 gap-2 text-center text-xs">
+                <div class="p-2.5 bg-slate-800/60 border border-slate-700/60 rounded-xl">
+                    <span class="text-[10px] text-slate-400 block"><i class="fas fa-tint text-sky-400 mr-1"></i>Lembap</span>
+                    <span id="wd-modal-humidity" class="text-sm font-bold font-mono text-white mt-0.5 block">72%</span>
                 </div>
-                <div class="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
-                    <div id="modal-area-bar" class="bg-gradient-to-r from-sky-500 to-teal-400 h-1.5 rounded-full transition-all duration-500" style="width: 7%"></div>
+                <div class="p-2.5 bg-slate-800/60 border border-slate-700/60 rounded-xl">
+                    <span class="text-[10px] text-slate-400 block"><i class="fas fa-wind text-teal-400 mr-1"></i>Angin</span>
+                    <span id="wd-modal-wind" class="text-sm font-bold font-mono text-teal-300 mt-0.5 block truncate">16 km/j</span>
+                    <span id="wd-modal-wind-dir" class="text-[9px] text-slate-400 block truncate">Tenggara</span>
                 </div>
-                <div id="modal-area-compare" class="text-[10px] text-slate-400 flex items-center gap-1">
-                    <i class="fas fa-chart-pie text-sky-400 text-[9px]"></i>
-                    <span id="modal-area-compare-text">1.5x lebih besar dari rata-rata kabupaten di NTT</span>
+                <div class="p-2.5 bg-slate-800/60 border border-slate-700/60 rounded-xl">
+                    <span class="text-[10px] text-slate-400 block"><i class="fas fa-cloud-rain text-blue-400 mr-1"></i>Hujan</span>
+                    <span id="wd-modal-rain" class="text-sm font-bold font-mono text-blue-300 mt-0.5 block">0.0 mm</span>
                 </div>
-            </div>
-
-            <!-- Coordinates & Reference Info -->
-            <div class="space-y-1.5 p-3 bg-slate-950/60 border border-slate-800 rounded-xl text-xs">
-                <div class="flex justify-between">
-                    <span class="text-slate-400">Titik Koordinat:</span>
-                    <span id="modal-coords" class="font-mono text-slate-200 font-medium">-8.5744°, 119.8714°</span>
-                </div>
-                <div class="flex justify-between">
-                    <span class="text-slate-400">Dasar Penetapan:</span>
-                    <span id="modal-uupp" class="text-slate-300 truncate max-w-[220px]">Hasil Delineasi Batas Desa</span>
-                </div>
-                <div class="flex justify-between">
-                    <span class="text-slate-400">Sistem Referensi:</span>
-                    <span id="modal-srs" class="text-slate-300">SRGI 2013</span>
-                </div>
-                <div class="flex justify-between">
-                    <span class="text-slate-400">Kode Metadata:</span>
-                    <span id="modal-meta" class="text-slate-400 font-mono text-[10px] truncate max-w-[200px]">TASWIL1000020221227</span>
+                <div class="p-2.5 bg-slate-800/60 border border-slate-700/60 rounded-xl">
+                    <span class="text-[10px] text-slate-400 block"><i class="fas fa-compass text-amber-400 mr-1"></i>Arah</span>
+                    <span id="wd-modal-dir-deg" class="text-sm font-bold font-mono text-amber-300 mt-0.5 block">135°</span>
                 </div>
             </div>
 
-            <!-- Iconic & Description -->
-            <div class="space-y-1 text-xs">
-                <span class="text-slate-400 text-[11px] font-semibold uppercase tracking-wider block">Potensi & Keunggulan Wilayah:</span>
-                <p id="modal-ikonik" class="text-slate-200 font-medium leading-relaxed"></p>
-                <p id="modal-deskripsi" class="text-slate-400 text-[11px] leading-relaxed pt-1"></p>
+            <!-- 5-Day Daily Forecast Outlook -->
+            <div class="space-y-2">
+                <div class="flex items-center justify-between text-xs font-semibold text-slate-300">
+                    <span class="flex items-center gap-1.5"><i class="fas fa-calendar-alt text-sky-400"></i> Prakiraan 5 Hari Kedepan</span>
+                    <span class="text-[10px] text-slate-400 font-normal">Suhu Min / Max & Potensi Hujan</span>
+                </div>
+                <div id="wd-modal-daily-list" class="space-y-1.5">
+                    <!-- Populated dynamically -->
+                </div>
             </div>
 
-            <!-- Action Buttons -->
-            <div class="grid grid-cols-3 gap-2 pt-2 border-t border-slate-800">
-                <a id="btn-gmaps" href="#" target="_blank" rel="noopener noreferrer" class="py-2 px-2 text-xs rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium flex items-center justify-center gap-1.5 transition">
-                    <i class="fas fa-external-link-alt text-xs text-sky-400"></i> Google Maps
-                </a>
-                <button id="btn-copy-coords" class="py-2 px-2 text-xs rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium flex items-center justify-center gap-1.5 transition">
-                    <i class="fas fa-copy text-xs text-emerald-400"></i> Salin Koordinat
+            <!-- Footer Actions -->
+            <div class="flex items-center justify-between pt-2 border-t border-slate-800">
+                <button onclick="copyWeatherInfo()" id="btn-copy-weather" class="px-3 py-2 text-xs rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium flex items-center gap-1.5 transition">
+                    <i class="fas fa-copy text-teal-400"></i> Salin Cuaca
                 </button>
-                <button id="btn-export-feature" class="py-2 px-2 text-xs rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-medium flex items-center justify-center gap-1.5 transition">
-                    <i class="fas fa-download text-xs"></i> GeoJSON
+                <button id="btn-focus-from-weather" class="px-4 py-2 text-xs rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-semibold flex items-center gap-1.5 shadow-md shadow-sky-600/20 transition">
+                    <i class="fas fa-crosshairs"></i> Fokus ke Batas Wilayah Ini
                 </button>
             </div>
         </div>

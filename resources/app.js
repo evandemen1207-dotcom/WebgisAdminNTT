@@ -34,6 +34,13 @@ window.webgis = {
   windSpeedLevel: 'medium',
   windDensity: 1100,
   windLineWidth: 0.85,
+  weatherActive: false,
+  weatherData: {},
+  weatherOverlays: [],
+  weatherLabelMode: 'temp_icon', // 'temp_icon' | 'temp_only' | 'detailed'
+  weatherZoneFilter: 'all',
+  weatherSearchQuery: '',
+  selectedWeatherRegion: null,
 };
 
 // Main island center point for each region (to guarantee single centered label)
@@ -284,6 +291,7 @@ document.addEventListener('DOMContentLoaded', () => {
   renderStatistics();
   initSwipeTool();
   initWindAnimation();
+  initWeatherSystem();
   bindEvents();
 });
 
@@ -964,9 +972,23 @@ function renderStatistics() {
       </div>
     </div>
 
+    <!-- Interactive Area Bar Chart (Chart.js) -->
+    <div class="mb-4 p-3.5 bg-slate-800/60 border border-slate-700/60 rounded-2xl space-y-2">
+      <div class="flex items-center justify-between">
+        <h4 class="text-xs font-bold uppercase tracking-wider text-white flex items-center gap-1.5">
+          <i class="fas fa-chart-bar text-sky-400"></i> Grafik Perbandingan Luas
+        </h4>
+        <span class="text-[10px] text-emerald-400 font-mono font-semibold">22 Daerah</span>
+      </div>
+      <p class="text-[11px] text-slate-400 leading-relaxed">Visualisasi komparasi luas wilayah geodesik (km²). Klik salah satu batang grafik untuk langsung memfokuskan peta ke wilayah tersebut.</p>
+      <div class="h-80 relative mt-2">
+        <canvas id="areaBarChart"></canvas>
+      </div>
+    </div>
+
     <div class="mb-4">
       <h4 class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-1.5">
-        <i class="fas fa-chart-bar text-sky-400"></i> 5 Wilayah Terluas
+        <i class="fas fa-trophy text-amber-400"></i> 5 Wilayah Terluas
       </h4>
       <div class="space-y-3 p-3 bg-slate-800/40 border border-slate-700/50 rounded-xl">
         ${top5Html}
@@ -982,6 +1004,11 @@ function renderStatistics() {
       </div>
     </div>
   `;
+
+  // Initialize or update Chart.js Bar Chart
+  setTimeout(() => {
+    renderAreaBarChart(features);
+  }, 50);
 }
 
 // Select & Focus Feature
@@ -993,14 +1020,13 @@ function selectAndFocusFeature(feature) {
   highlightSource.clear();
   highlightSource.addFeature(feature);
 
-  // Smooth Camera Fly-To
+  // Smooth Camera Fly-To with optimized padding for compact responsive modal
   const isMobile = window.innerWidth < 768;
-  // Account for the floating feature modal on bottom-right
-  const padding = isMobile ? [60, 20, 320, 20] : [70, 180, 70, 70];
+  const padding = isMobile ? [40, 16, 210, 16] : [60, 420, 60, 60];
   window.webgis.map.updateSize();
   window.webgis.map.getView().fit(feature.getGeometry(), {
     padding: padding,
-    duration: 900,
+    duration: 850,
     maxZoom: 12
   });
 
@@ -1009,6 +1035,76 @@ function selectAndFocusFeature(feature) {
 
   // Re-render region list to highlight selected card
   initRegionList();
+}
+
+// State for feature detail modal
+window.webgis.isModalMinimized = false;
+window.webgis.currentModalTab = 'ringkasan';
+
+function toggleModalExpand() {
+  window.webgis.isModalMinimized = !window.webgis.isModalMinimized;
+  applyModalExpandedState();
+}
+
+function setModalExpanded(expanded) {
+  window.webgis.isModalMinimized = !expanded;
+  applyModalExpandedState();
+}
+
+function applyModalExpandedState() {
+  const content = document.getElementById('modal-expandable-content');
+  const summary = document.getElementById('modal-minimized-summary');
+  const icon = document.getElementById('icon-toggle-modal-expand');
+  const modal = document.getElementById('feature-detail-modal');
+  if (!modal || !content) return;
+
+  if (window.webgis.isModalMinimized) {
+    content.classList.add('hidden');
+    if (summary) summary.classList.remove('hidden');
+    if (icon) {
+      icon.classList.remove('fa-chevron-down');
+      icon.classList.add('fa-chevron-up');
+    }
+  } else {
+    content.classList.remove('hidden');
+    if (summary) summary.classList.add('hidden');
+    if (icon) {
+      icon.classList.remove('fa-chevron-up');
+      icon.classList.add('fa-chevron-down');
+    }
+  }
+}
+
+function switchModalTab(tabKey) {
+  window.webgis.currentModalTab = tabKey;
+  const tabs = ['ringkasan', 'cuaca', 'teknis'];
+  
+  tabs.forEach((key) => {
+    const btn = document.getElementById(`btn-modal-tab-${key}`);
+    const panel = document.getElementById(`modal-panel-${key}`);
+    const isActive = key === tabKey;
+
+    if (panel) {
+      panel.classList.toggle('hidden', !isActive);
+    }
+
+    if (btn) {
+      if (isActive) {
+        btn.className = 'modal-tab-btn px-2.5 py-1 rounded-lg font-semibold transition text-sky-400 bg-sky-500/15 border border-sky-500/30 flex items-center gap-1.5';
+      } else {
+        btn.className = 'modal-tab-btn px-2.5 py-1 rounded-lg font-semibold transition text-slate-400 hover:text-slate-200 border border-transparent flex items-center gap-1.5';
+      }
+    }
+  });
+}
+
+function openCurrentRegionFullWeather() {
+  if (window.webgis.selectedFeature) {
+    const name = window.webgis.selectedFeature.get('WADMKK');
+    if (typeof openWeatherDetailModal === 'function') {
+      openWeatherDetailModal(name);
+    }
+  }
 }
 
 // Feature Detail Drawer / Modal
@@ -1051,6 +1147,12 @@ function showFeatureModal(feature) {
   document.getElementById('modal-ikonik').textContent = ikonik;
   document.getElementById('modal-deskripsi').textContent = deskripsi;
 
+  // Minimized summary text
+  const summaryEl = document.getElementById('modal-minimized-summary');
+  if (summaryEl) {
+    summaryEl.textContent = `${areaKm2.toLocaleString('id-ID')} km² · ${ibuKota}`;
+  }
+
   // Spatial Proportion Insight
   const totalNttArea = 46446; // km²
   const pct = Math.min(100, Math.max(0.1, (areaKm2 / totalNttArea) * 100));
@@ -1086,7 +1188,7 @@ function showFeatureModal(feature) {
     showToast(`Koordinat ${latStr}, ${lonStr} berhasil disalin!`, 'success', 'check-circle');
     copyBtn.innerHTML = '<i class="fas fa-check text-emerald-400 mr-1.5"></i>Tersalin!';
     setTimeout(() => {
-      copyBtn.innerHTML = '<i class="fas fa-copy mr-1.5 text-emerald-400"></i>Salin Koordinat';
+      copyBtn.innerHTML = '<i class="fas fa-copy mr-1 text-emerald-400 text-[10px]"></i>Koordinat';
     }, 2000);
   };
 
@@ -1095,6 +1197,20 @@ function showFeatureModal(feature) {
   exportBtn.onclick = () => {
     exportSingleFeature(feature);
   };
+
+  // Populate Live Weather in Boundary Inspector
+  updateModalWeatherCard(name, ibuKota);
+
+  // Update weather badge on in-modal tab
+  const w = window.webgis.weatherData ? window.webgis.weatherData[name] : null;
+  const tabTempBadge = document.getElementById('modal-tab-temp-badge');
+  if (tabTempBadge) {
+    tabTempBadge.textContent = w ? `${Math.round(w.temperature)}°` : '--°';
+  }
+
+  // Reset to expanded state and default tab on selection
+  setModalExpanded(true);
+  switchModalTab('ringkasan');
 
   modal.classList.remove('hidden');
 }
@@ -1105,7 +1221,9 @@ function closeFeatureModal() {
   
   // Clear highlight
   window.webgis.selectedFeature = null;
-  window.webgis.highlightLayer.getSource().clear();
+  if (window.webgis.highlightLayer) {
+    window.webgis.highlightLayer.getSource().clear();
+  }
   initRegionList();
 }
 
@@ -1362,6 +1480,8 @@ function bindEvents() {
 
       if (tab === 'stats') {
         renderStatistics();
+      } else if (tab === 'weather') {
+        renderWeatherSidebarTab();
       }
     });
   });
@@ -1927,13 +2047,13 @@ function computeWindVector(lon, lat, pattern) {
 
 function getWindColor(speed) {
   if (speed < 12) {
-    return 'rgba(56, 189, 248, 0.75)'; // sky-400
+    return 'rgba(56, 189, 248, 0.65)'; // sky-400
   } else if (speed < 20) {
-    return 'rgba(45, 212, 191, 0.8)';  // teal-400
+    return 'rgba(45, 212, 191, 0.7)';  // teal-400
   } else if (speed < 28) {
-    return 'rgba(251, 191, 36, 0.85)'; // amber-400
+    return 'rgba(251, 191, 36, 0.75)'; // amber-400
   } else {
-    return 'rgba(244, 63, 94, 0.9)';   // rose-500
+    return 'rgba(244, 63, 94, 0.8)';   // rose-500
   }
 }
 
@@ -1965,7 +2085,8 @@ function animateWind() {
   windCtx.fillRect(0, 0, mapSize[0], mapSize[1]);
   windCtx.globalCompositeOperation = 'source-over';
   windCtx.lineCap = 'round';
-  windCtx.lineWidth = 1.6;
+  // Subtle, smooth and thin wind lines on initial load as requested
+  windCtx.lineWidth = window.webgis.windLineWidth || 0.85;
 
   for (let i = 0; i < windParticles.length; i++) {
     const p = windParticles[i];
@@ -2162,3 +2283,849 @@ window.toggleWindAnimation = toggleWindAnimation;
 window.onWindPatternChange = onWindPatternChange;
 window.setWindSpeed = setWindSpeed;
 window.onWindDensityInput = onWindDensityInput;
+
+/* ==========================================================================
+   FEATURE 3: INTERACTIVE STATISTICS BAR CHART (Chart.js)
+   ========================================================================== */
+
+let areaChartInstance = null;
+
+function renderAreaBarChart(features) {
+  const canvas = document.getElementById('areaBarChart');
+  if (!canvas) return;
+  if (typeof Chart === 'undefined') {
+    console.warn('Chart.js library not loaded yet');
+    return;
+  }
+
+  const sorted = [...features].sort((a, b) => b.get('calculatedAreaKm2') - a.get('calculatedAreaKm2'));
+  const labels = sorted.map((f) => f.get('WADMKK'));
+  const data = sorted.map((f) => f.get('calculatedAreaKm2'));
+  const colors = sorted.map((f) => f.get('colorHex') || '#38bdf8');
+
+  if (areaChartInstance) {
+    areaChartInstance.destroy();
+    areaChartInstance = null;
+  }
+
+  const ctx = canvas.getContext('2d');
+  areaChartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [
+        {
+          label: 'Luas Geodesik (km²)',
+          data: data,
+          backgroundColor: colors.map((c) => hexToRgba(c, 0.7)),
+          hoverBackgroundColor: colors.map((c) => hexToRgba(c, 0.95)),
+          borderColor: colors,
+          borderWidth: 1.5,
+          borderRadius: 4
+        }
+      ]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: {
+        duration: 700
+      },
+      plugins: {
+        legend: {
+          display: false
+        },
+        tooltip: {
+          backgroundColor: 'rgba(15, 23, 42, 0.95)',
+          titleColor: '#ffffff',
+          titleFont: { size: 12, weight: 'bold', family: '"Plus Jakarta Sans", sans-serif' },
+          bodyColor: '#38bdf8',
+          bodyFont: { size: 11, family: 'monospace' },
+          borderColor: 'rgba(56, 189, 248, 0.4)',
+          borderWidth: 1,
+          padding: 10,
+          cornerRadius: 8,
+          displayColors: false,
+          callbacks: {
+            title: function (context) {
+              return context[0].label;
+            },
+            label: function (context) {
+              const km2 = context.parsed.x;
+              const ha = (km2 * 100).toLocaleString('id-ID');
+              const totalNttArea = 46446;
+              const pct = ((km2 / totalNttArea) * 100).toFixed(1);
+              return [
+                `Luas: ${km2.toLocaleString('id-ID')} km² (${ha} Ha)`,
+                `Porsi NTT: ${pct}% · Klik untuk zoom`
+              ];
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: {
+            color: 'rgba(51, 65, 85, 0.35)',
+            drawBorder: false
+          },
+          ticks: {
+            color: '#94a3b8',
+            font: { size: 10, family: 'monospace' },
+            callback: function (val) {
+              return val >= 1000 ? val / 1000 + 'k' : val;
+            }
+          }
+        },
+        y: {
+          grid: {
+            display: false
+          },
+          ticks: {
+            color: '#cbd5e1',
+            font: { size: 10, weight: 600, family: '"Plus Jakarta Sans", sans-serif' }
+          }
+        }
+      },
+      onClick: (evt, elements) => {
+        if (elements && elements.length > 0) {
+          const index = elements[0].index;
+          const targetFeature = sorted[index];
+          if (targetFeature) {
+            selectAndFocusFeature(targetFeature);
+          }
+        }
+      }
+    }
+  });
+}
+
+/* ==========================================================================
+   FEATURE 4: LIVE PUBLIC WEATHER FORECAST ENGINE (Open-Meteo & BMKG Grid)
+   ========================================================================== */
+
+// Realistic fallback climate data for NTT (used if offline / network error)
+const NTT_BASELINE_CLIMATE = {
+  'Kota Kupang': { temp: 31.8, desc: 'Cerah Berawan', icon: '🌤️', code: 1, hum: 68, wind: 20.4, rain: 0 },
+  'Kupang': { temp: 29.5, desc: 'Cerah Berawan', icon: '🌤️', code: 1, hum: 72, wind: 18.5, rain: 0 },
+  'Manggarai Barat': { temp: 29.8, desc: 'Cerah', icon: '☀️', code: 0, hum: 70, wind: 14.8, rain: 0 },
+  'Manggarai': { temp: 21.4, desc: 'Sebagian Berawan', icon: '⛅', code: 2, hum: 88, wind: 11.2, rain: 0.2 },
+  'Manggarai Timur': { temp: 23.6, desc: 'Cerah Berawan', icon: '🌤️', code: 1, hum: 82, wind: 12.0, rain: 0 },
+  'Ngada': { temp: 20.2, desc: 'Berawan Sejuk', icon: '⛅', code: 2, hum: 90, wind: 13.5, rain: 0 },
+  'Nagekeo': { temp: 28.5, desc: 'Cerah Berawan', icon: '🌤️', code: 1, hum: 74, wind: 16.2, rain: 0 },
+  'Ende': { temp: 27.6, desc: 'Sebagian Berawan', icon: '⛅', code: 2, hum: 78, wind: 15.0, rain: 0 },
+  'Sikka': { temp: 28.9, desc: 'Cerah Berawan', icon: '🌤️', code: 1, hum: 75, wind: 17.5, rain: 0 },
+  'Flores Timur': { temp: 28.2, desc: 'Cerah Berawan', icon: '🌤️', code: 1, hum: 76, wind: 19.0, rain: 0 },
+  'Lembata': { temp: 29.1, desc: 'Cerah', icon: '☀️', code: 0, hum: 71, wind: 21.0, rain: 0 },
+  'Alor': { temp: 28.4, desc: 'Cerah Berawan', icon: '🌤️', code: 1, hum: 73, wind: 18.2, rain: 0 },
+  'Rote Ndao': { temp: 30.2, desc: 'Cerah', icon: '☀️', code: 0, hum: 69, wind: 24.5, rain: 0 },
+  'Sabu Raijua': { temp: 31.0, desc: 'Cerah Panas', icon: '☀️', code: 0, hum: 65, wind: 22.8, rain: 0 },
+  'Sumba Timur': { temp: 30.6, desc: 'Cerah Berawan', icon: '🌤️', code: 1, hum: 67, wind: 23.0, rain: 0 },
+  'Sumba Barat': { temp: 27.2, desc: 'Cerah Berawan', icon: '🌤️', code: 1, hum: 79, wind: 14.5, rain: 0 },
+  'Sumba Barat Daya': { temp: 27.8, desc: 'Sebagian Berawan', icon: '⛅', code: 2, hum: 81, wind: 15.6, rain: 0 },
+  'Sumba Tengah': { temp: 27.0, desc: 'Cerah Berawan', icon: '🌤️', code: 1, hum: 80, wind: 14.0, rain: 0 },
+  'Belu': { temp: 28.7, desc: 'Cerah Berawan', icon: '🌤️', code: 1, hum: 75, wind: 17.2, rain: 0 },
+  'Malaka': { temp: 29.4, desc: 'Cerah Berawan', icon: '🌤️', code: 1, hum: 74, wind: 18.0, rain: 0 },
+  'Timor Tengah Utara': { temp: 27.9, desc: 'Cerah Berawan', icon: '🌤️', code: 1, hum: 77, wind: 16.5, rain: 0 },
+  'Timor Tengah Selatan': { temp: 22.8, desc: 'Berawan Pegunungan', icon: '⛅', code: 2, hum: 86, wind: 14.2, rain: 0 }
+};
+
+function initWeatherSystem() {
+  // Bind Weather UI Controls
+  const toggleMapCheck = document.getElementById('toggle-weather-map-check');
+  if (toggleMapCheck) {
+    toggleMapCheck.checked = window.webgis.weatherActive;
+    toggleMapCheck.addEventListener('change', (e) => {
+      toggleWeatherMapLayer(e.target.checked);
+    });
+  }
+
+  const dot = document.getElementById('weather-badge-status-dot');
+  if (dot) {
+    dot.className = window.webgis.weatherActive
+      ? 'w-2 h-2 rounded-full bg-emerald-400 animate-pulse'
+      : 'w-2 h-2 rounded-full bg-slate-500';
+  }
+
+  const modeSelect = document.getElementById('weather-label-mode-select');
+  if (modeSelect) {
+    modeSelect.value = window.webgis.weatherLabelMode;
+    modeSelect.addEventListener('change', (e) => {
+      onWeatherLabelModeChange(e.target.value);
+    });
+  }
+
+  // Weather Search
+  const weatherSearch = document.getElementById('weather-search-input');
+  if (weatherSearch) {
+    weatherSearch.addEventListener('input', (e) => {
+      window.webgis.weatherSearchQuery = e.target.value.trim().toLowerCase();
+      renderWeatherSidebarTab();
+    });
+  }
+
+  // Weather Zone Filter Pills
+  document.querySelectorAll('.weather-zone-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const zone = btn.dataset.wzone;
+      window.webgis.weatherZoneFilter = zone;
+
+      document.querySelectorAll('.weather-zone-btn').forEach((b) => {
+        if (b.dataset.wzone === zone) {
+          b.className = 'weather-zone-btn px-2.5 py-1 rounded-lg bg-amber-500 text-slate-950 font-bold whitespace-nowrap transition';
+        } else {
+          b.className = 'weather-zone-btn px-2.5 py-1 rounded-lg bg-slate-800 text-slate-400 hover:text-white whitespace-nowrap transition';
+        }
+      });
+
+      renderWeatherSidebarTab();
+    });
+  });
+
+  // Fetch Weather Data from API
+  fetchWeatherData();
+
+  // Auto-refresh weather every 15 minutes
+  setInterval(() => {
+    fetchWeatherData(false);
+  }, 15 * 60 * 1000);
+}
+
+// Fetch Weather Data with smart fallbacks
+async function fetchWeatherData(forceRefresh = false) {
+  const refreshIcon = document.getElementById('weather-refresh-icon');
+  if (refreshIcon) refreshIcon.classList.add('fa-spin');
+
+  try {
+    let rawLocations = null;
+    let updatedAt = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WITA';
+
+    // 1. Try internal proxy endpoint
+    try {
+      const res = await fetch('/api/weather');
+      if (res.ok) {
+        const json = await res.json();
+        if (json.locations && json.locations.length > 0) {
+          rawLocations = json.locations;
+          if (json.updatedAt) {
+            updatedAt = new Date(json.updatedAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WITA';
+          }
+        }
+      }
+    } catch (apiErr) {
+      console.warn('Local /api/weather unavailable, attempting direct Open-Meteo call:', apiErr);
+    }
+
+    // 2. Direct Open-Meteo API fallback if proxy didn't return data
+    if (!rawLocations) {
+      const regencyNames = Object.keys(MAIN_ISLAND_CENTERS);
+      const lats = regencyNames.map((name) => MAIN_ISLAND_CENTERS[name][1]).join(',');
+      const lons = regencyNames.map((name) => MAIN_ISLAND_CENTERS[name][0]).join(',');
+      const directUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lats}&longitude=${lons}&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,wind_direction_10m&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,wind_speed_10m_max&timezone=Asia%2FMakassar`;
+
+      const directRes = await fetch(directUrl);
+      if (directRes.ok) {
+        const directData = await directRes.json();
+        const list = Array.isArray(directData) ? directData : [directData];
+        rawLocations = regencyNames.map((name, i) => {
+          const item = list[i] || {};
+          const curr = item.current || {};
+          const daily = item.daily || {};
+          const wInfo = getWmoWeatherInfo(curr.weather_code || 0);
+
+          const days = [];
+          if (daily.time) {
+            for (let d = 0; d < Math.min(5, daily.time.length); d++) {
+              const code = daily.weather_code ? daily.weather_code[d] : curr.weather_code;
+              days.push({
+                date: daily.time[d],
+                weatherCode: code,
+                weatherDesc: getWmoWeatherInfo(code).text,
+                icon: getWmoWeatherInfo(code).icon,
+                tempMax: daily.temperature_2m_max ? Math.round(daily.temperature_2m_max[d]) : null,
+                tempMin: daily.temperature_2m_min ? Math.round(daily.temperature_2m_min[d]) : null,
+                precipProb: daily.precipitation_probability_max ? daily.precipitation_probability_max[d] : 0,
+                windMax: daily.wind_speed_10m_max ? Math.round(daily.wind_speed_10m_max[d]) : null
+              });
+            }
+          }
+
+          return {
+            name: name,
+            ibuKota: NTT_REGIONS_INFO[name]?.ibuKota || name,
+            lat: MAIN_ISLAND_CENTERS[name][1],
+            lon: MAIN_ISLAND_CENTERS[name][0],
+            temperature: Math.round((curr.temperature_2m || 28) * 10) / 10,
+            feelsLike: Math.round((curr.apparent_temperature || curr.temperature_2m || 30) * 10) / 10,
+            humidity: curr.relative_humidity_2m || 75,
+            precipitation: curr.precipitation || 0,
+            weatherCode: curr.weather_code || 0,
+            weatherText: wInfo.text,
+            weatherIcon: wInfo.icon,
+            windSpeedKmH: Math.round((curr.wind_speed_10m || 15) * 10) / 10,
+            windDirectionDeg: curr.wind_direction_10m || 135,
+            windDirectionText: getWindDirLabel(curr.wind_direction_10m || 135),
+            dailyForecast: days
+          };
+        });
+      }
+    }
+
+    // 3. Fallback to baseline data if still null
+    if (!rawLocations) {
+      rawLocations = Object.keys(MAIN_ISLAND_CENTERS).map((name) => {
+        const b = NTT_BASELINE_CLIMATE[name] || { temp: 28, desc: 'Cerah Berawan', icon: '🌤️', code: 1, hum: 75, wind: 18, rain: 0 };
+        return {
+          name: name,
+          ibuKota: NTT_REGIONS_INFO[name]?.ibuKota || name,
+          lat: MAIN_ISLAND_CENTERS[name][1],
+          lon: MAIN_ISLAND_CENTERS[name][0],
+          temperature: b.temp,
+          feelsLike: Math.round((b.temp + 2.5) * 10) / 10,
+          humidity: b.hum,
+          precipitation: b.rain,
+          weatherCode: b.code,
+          weatherText: b.desc,
+          weatherIcon: b.icon,
+          windSpeedKmH: b.wind,
+          windDirectionDeg: 135,
+          windDirectionText: 'Tenggara',
+          dailyForecast: generateBaselineDaily(b)
+        };
+      });
+    }
+
+    // Index by region name
+    const weatherMap = {};
+    rawLocations.forEach((item) => {
+      weatherMap[item.name] = item;
+    });
+
+    window.webgis.weatherData = weatherMap;
+
+    // Update Last Updated Timestamp
+    const lastUpdEl = document.getElementById('weather-last-updated-text');
+    if (lastUpdEl) lastUpdEl.textContent = updatedAt;
+
+    // Render components
+    renderWeatherMapOverlays();
+    renderWeatherSidebarTab();
+    updateMapWeatherChip();
+
+    // If modal is open, refresh its weather
+    if (window.webgis.selectedFeature) {
+      const fName = window.webgis.selectedFeature.get('WADMKK');
+      const fIbu = window.webgis.selectedFeature.get('ibuKota');
+      updateModalWeatherCard(fName, fIbu);
+    }
+
+    if (forceRefresh) {
+      showToast('Cuaca Diperbarui', `Data cuaca terkini 22 kabupaten/kota (${updatedAt}) berhasil dimuat.`, 'success', 'cloud-sun');
+    }
+  } catch (err) {
+    console.error('Error fetching weather data:', err);
+    showToast('Info Cuaca', 'Menampilkan data estimasi iklim regional NTT.', 'info');
+  } finally {
+    if (refreshIcon) {
+      setTimeout(() => {
+        refreshIcon.classList.remove('fa-spin');
+      }, 400);
+    }
+  }
+}
+
+// Generate fallback 5-day daily forecast
+function generateBaselineDaily(base) {
+  const dates = [];
+  const today = new Date();
+  for (let i = 0; i < 5; i++) {
+    const d = new Date(today);
+    d.setDate(d.getDate() + i);
+    dates.push({
+      date: d.toISOString().split('T')[0],
+      weatherCode: base.code,
+      weatherDesc: base.desc,
+      icon: base.icon,
+      tempMax: Math.round(base.temp + 3),
+      tempMin: Math.round(base.temp - 5),
+      precipProb: i === 3 ? 35 : 10,
+      windMax: Math.round(base.wind * 1.2)
+    });
+  }
+  return dates;
+}
+
+function getWmoWeatherInfo(code) {
+  switch (code) {
+    case 0: return { text: 'Cerah', icon: '☀️' };
+    case 1: return { text: 'Cerah Berawan', icon: '🌤️' };
+    case 2: return { text: 'Sebagian Berawan', icon: '⛅' };
+    case 3: return { text: 'Berawan Tebal', icon: '☁️' };
+    case 45:
+    case 48: return { text: 'Berkabut', icon: '🌫️' };
+    case 51:
+    case 53: return { text: 'Gerimis Ringan', icon: '🌦️' };
+    case 55: return { text: 'Gerimis Lebat', icon: '🌧️' };
+    case 61: return { text: 'Hujan Ringan', icon: '🌧️' };
+    case 63: return { text: 'Hujan Sedang', icon: '🌧️' };
+    case 65: return { text: 'Hujan Lebat', icon: '🌧️' };
+    case 80: return { text: 'Hujan Lokal', icon: '🌦️' };
+    case 81:
+    case 82: return { text: 'Hujan Guyur / Lebat', icon: '🌧️' };
+    case 95:
+    case 96:
+    case 99: return { text: 'Hujan Badai Petir', icon: '⛈️' };
+    default: return { text: 'Cerah Berawan', icon: '🌤️' };
+  }
+}
+
+function getWindDirLabel(deg) {
+  const dirs = ['Utara', 'Timur Laut', 'Timur', 'Tenggara', 'Selatan', 'Barat Daya', 'Barat', 'Barat Laut'];
+  return dirs[Math.round(((deg % 360) / 45)) % 8];
+}
+
+// Render Weather Overlays directly onto OpenLayers Map
+function renderWeatherMapOverlays() {
+  const map = window.webgis.map;
+  if (!map) return;
+
+  // Clear existing weather overlays
+  if (window.webgis.weatherOverlays && window.webgis.weatherOverlays.length > 0) {
+    window.webgis.weatherOverlays.forEach((overlay) => {
+      map.removeOverlay(overlay);
+    });
+    window.webgis.weatherOverlays = [];
+  }
+
+  if (!window.webgis.weatherActive) return;
+
+  const data = window.webgis.weatherData;
+  if (!data || Object.keys(data).length === 0) return;
+
+  Object.keys(MAIN_ISLAND_CENTERS).forEach((name) => {
+    const w = data[name];
+    if (!w) return;
+
+    const lonLat = MAIN_ISLAND_CENTERS[name];
+    const mode = window.webgis.weatherLabelMode || 'temp_icon';
+
+    const markerEl = document.createElement('div');
+    markerEl.className = 'weather-map-pin flex items-center gap-1.5 bg-slate-900/90 hover:bg-slate-900 border border-slate-700/80 hover:border-amber-400/90 px-2 py-1 rounded-xl shadow-xl backdrop-blur cursor-pointer transition-all duration-200 hover:scale-110 pointer-events-auto select-none group';
+    markerEl.title = `${name} (${w.ibuKota}): ${w.weatherText}, ${w.temperature}°C`;
+
+    let contentHtml = '';
+    if (mode === 'temp_only') {
+      contentHtml = `
+        <span class="font-mono text-amber-300 text-xs font-extrabold tracking-tight">${w.temperature}°C</span>
+      `;
+    } else if (mode === 'detailed') {
+      contentHtml = `
+        <span class="text-sm leading-none">${w.weatherIcon}</span>
+        <span class="font-mono text-white text-xs font-bold leading-none">${w.temperature}°</span>
+        <span class="text-[9px] text-teal-300 font-mono flex items-center gap-0.5 leading-none pl-1 border-l border-slate-700/60">
+          <i class="fas fa-wind text-[8px]"></i>${w.windSpeedKmH}
+        </span>
+      `;
+    } else {
+      // 'temp_icon'
+      contentHtml = `
+        <span class="text-sm leading-none">${w.weatherIcon}</span>
+        <span class="font-mono text-white text-xs font-bold leading-none">${w.temperature}°C</span>
+      `;
+    }
+
+    markerEl.innerHTML = `
+      ${contentHtml}
+      <span class="text-[10px] text-slate-400 group-hover:text-amber-300 transition-colors hidden lg:inline max-w-[85px] truncate font-medium ml-0.5">${name}</span>
+    `;
+
+    // Click handler: Select feature & open Weather Detail Modal
+    markerEl.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const feature = window.webgis.features.find((f) => f.get('WADMKK') === name);
+      if (feature) {
+        selectAndFocusFeature(feature);
+      }
+      openWeatherDetailModal(name);
+    });
+
+    const overlay = new ol.Overlay({
+      element: markerEl,
+      position: ol.proj.fromLonLat(lonLat),
+      positioning: 'center-center',
+      stopEvent: false
+    });
+
+    map.addOverlay(overlay);
+    window.webgis.weatherOverlays.push(overlay);
+  });
+}
+
+// Toggle Weather Map Layer
+function toggleWeatherMapLayer(enable) {
+  if (enable === undefined) {
+    enable = !window.webgis.weatherActive;
+  }
+  window.webgis.weatherActive = !!enable;
+
+  // Sync checkboxes & indicators
+  const check = document.getElementById('toggle-weather-map-check');
+  if (check) check.checked = window.webgis.weatherActive;
+
+  const dot = document.getElementById('weather-badge-status-dot');
+  if (dot) {
+    dot.className = window.webgis.weatherActive
+      ? 'w-2 h-2 rounded-full bg-emerald-400 animate-pulse'
+      : 'w-2 h-2 rounded-full bg-slate-500';
+  }
+
+  // Toggle map markers
+  if (window.webgis.weatherActive) {
+    renderWeatherMapOverlays();
+    showToast('Pin Cuaca Aktif', 'Prakiraan cuaca live ditampilkan di atas setiap wilayah peta NTT.', 'info', 'cloud-sun');
+  } else {
+    if (window.webgis.weatherOverlays) {
+      window.webgis.weatherOverlays.forEach((overlay) => {
+        window.webgis.map.removeOverlay(overlay);
+      });
+      window.webgis.weatherOverlays = [];
+    }
+    showToast('Pin Cuaca Dinonaktifkan', 'Label cuaca disembunyikan dari peta.', 'info');
+  }
+}
+
+// Change format mode of weather pins
+function onWeatherLabelModeChange(mode) {
+  window.webgis.weatherLabelMode = mode;
+  renderWeatherMapOverlays();
+}
+
+// Update Top Bar & Floating Map Chip
+function updateMapWeatherChip() {
+  const data = window.webgis.weatherData;
+  if (!data) return;
+
+  const items = Object.values(data);
+  if (!items.length) return;
+
+  const avgTemp = (items.reduce((s, it) => s + it.temperature, 0) / items.length).toFixed(1);
+  const avgWind = Math.round(items.reduce((s, it) => s + it.windSpeedKmH, 0) / items.length);
+
+  const chipTemp = document.getElementById('map-weather-chip-temp');
+  if (chipTemp) chipTemp.textContent = `${avgTemp}°C`;
+
+  const chipCond = document.getElementById('map-weather-chip-cond');
+  if (chipCond) chipCond.textContent = `Rata-rata NTT · Angin ~${avgWind} km/j`;
+}
+
+// Render the Weather Sidebar Tab Panel
+function renderWeatherSidebarTab() {
+  const overviewContainer = document.getElementById('weather-overview-container');
+  const cardsContainer = document.getElementById('weather-cards-list');
+  const data = window.webgis.weatherData;
+
+  if (!data || Object.keys(data).length === 0) {
+    if (cardsContainer) {
+      cardsContainer.innerHTML = `
+        <div class="py-10 text-center text-slate-400">
+          <i class="fas fa-spinner fa-spin text-2xl text-amber-400 mb-2"></i>
+          <p class="text-xs">Memuat data cuaca BMKG / Open-Meteo...</p>
+        </div>
+      `;
+    }
+    return;
+  }
+
+  const items = Object.values(data);
+  const temps = items.map((it) => it.temperature);
+  const avgTemp = (temps.reduce((a, b) => a + b, 0) / temps.length).toFixed(1);
+
+  // Highest and lowest
+  const hottest = [...items].sort((a, b) => b.temperature - a.temperature)[0];
+  const coolest = [...items].sort((a, b) => a.temperature - b.temperature)[0];
+
+  if (overviewContainer) {
+    overviewContainer.innerHTML = `
+      <div class="p-3 bg-slate-800/80 border border-slate-700/80 rounded-xl space-y-1">
+        <span class="text-[10px] text-slate-400 uppercase font-semibold">Rata-rata Suhu NTT</span>
+        <div class="flex items-baseline gap-1">
+          <span class="text-xl font-bold font-mono text-white">${avgTemp}</span>
+          <span class="text-xs text-amber-400 font-bold">°C</span>
+        </div>
+        <span class="text-[10px] text-slate-400 block truncate">22 Titik Stasiun BMKG</span>
+      </div>
+
+      <div class="p-3 bg-slate-800/80 border border-slate-700/80 rounded-xl space-y-1">
+        <span class="text-[10px] text-slate-400 uppercase font-semibold">Terpanas / Tersejuk</span>
+        <div class="text-[11px] font-semibold text-rose-400 truncate">
+          🔥 ${hottest.ibuKota}: <span class="font-mono">${hottest.temperature}°C</span>
+        </div>
+        <div class="text-[11px] font-semibold text-sky-400 truncate">
+          ❄️ ${coolest.ibuKota}: <span class="font-mono">${coolest.temperature}°C</span>
+        </div>
+      </div>
+    `;
+  }
+
+  // Filter items
+  const query = window.webgis.weatherSearchQuery || '';
+  const zone = window.webgis.weatherZoneFilter || 'all';
+
+  const filtered = items.filter((it) => {
+    const info = NTT_REGIONS_INFO[it.name] || {};
+    const matchesSearch = it.name.toLowerCase().includes(query) || it.ibuKota.toLowerCase().includes(query);
+    const matchesZone = zone === 'all' || info.zona === zone;
+    return matchesSearch && matchesZone;
+  });
+
+  if (cardsContainer) {
+    if (filtered.length === 0) {
+      cardsContainer.innerHTML = `
+        <div class="py-8 text-center text-slate-400">
+          <i class="fas fa-search text-xl text-slate-500 mb-1.5"></i>
+          <p class="text-xs">Tidak ada kabupaten yang sesuai filter</p>
+        </div>
+      `;
+      return;
+    }
+
+    cardsContainer.innerHTML = filtered
+      .map((it) => {
+        const info = NTT_REGIONS_INFO[it.name] || {};
+        const tempClass = it.temperature >= 30 ? 'text-amber-400' : it.temperature <= 22 ? 'text-sky-300' : 'text-emerald-400';
+
+        return `
+          <div class="p-3 rounded-xl bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 hover:border-slate-600 transition cursor-pointer" onclick="onWeatherCardClick('${it.name}')">
+            <div class="flex items-start justify-between gap-2">
+              <div class="flex items-center gap-2.5">
+                <span class="text-2xl">${it.weatherIcon}</span>
+                <div>
+                  <h4 class="text-xs font-bold text-white leading-tight flex items-center gap-1.5">
+                    ${it.name}
+                  </h4>
+                  <p class="text-[10px] text-slate-400 mt-0.5">
+                    Ibu Kota: <span class="text-slate-300 font-medium">${it.ibuKota}</span>
+                  </p>
+                </div>
+              </div>
+              <div class="text-right">
+                <span class="text-base font-extrabold font-mono ${tempClass}">${it.temperature}°C</span>
+                <span class="text-[10px] text-slate-400 block">${it.weatherText}</span>
+              </div>
+            </div>
+
+            <div class="mt-2 pt-2 border-t border-slate-700/50 flex items-center justify-between text-[10px] text-slate-400 font-mono">
+              <div class="flex items-center gap-3">
+                <span><i class="fas fa-tint text-sky-400 mr-1"></i>${it.humidity}%</span>
+                <span><i class="fas fa-wind text-teal-400 mr-1"></i>${it.windSpeedKmH} km/j</span>
+              </div>
+              <span class="text-sky-400 font-medium hover:text-sky-300 flex items-center gap-1">
+                Detail &amp; Zoom &rsaquo;
+              </span>
+            </div>
+          </div>
+        `;
+      })
+      .join('');
+  }
+}
+
+function onWeatherCardClick(regionName) {
+  const feature = window.webgis.features.find((f) => f.get('WADMKK') === regionName);
+  if (feature) {
+    selectAndFocusFeature(feature);
+  }
+  openWeatherDetailModal(regionName);
+}
+
+// Update the real-time weather card inside feature-detail-modal
+function updateModalWeatherCard(name, ibuKota) {
+  const weatherCard = document.getElementById('modal-weather-card');
+  if (!weatherCard) return;
+
+  const w = window.webgis.weatherData[name];
+  if (!w) {
+    weatherCard.classList.add('hidden');
+    return;
+  }
+
+  weatherCard.classList.remove('hidden');
+
+  const capitalEl = document.getElementById('modal-weather-capital');
+  if (capitalEl) capitalEl.textContent = ibuKota || w.ibuKota;
+
+  const condBadge = document.getElementById('modal-weather-condition-badge');
+  if (condBadge) condBadge.textContent = w.weatherText;
+
+  const iconEl = document.getElementById('modal-weather-icon');
+  if (iconEl) iconEl.textContent = w.weatherIcon;
+
+  const tempEl = document.getElementById('modal-weather-temp');
+  if (tempEl) tempEl.textContent = w.temperature;
+
+  const feelsEl = document.getElementById('modal-weather-feels');
+  if (feelsEl) feelsEl.textContent = w.feelsLike;
+
+  const humEl = document.getElementById('modal-weather-humidity');
+  if (humEl) humEl.textContent = `${w.humidity}%`;
+
+  const windEl = document.getElementById('modal-weather-wind');
+  if (windEl) windEl.textContent = `${w.windSpeedKmH} km/j`;
+
+  const rainEl = document.getElementById('modal-weather-rain');
+  if (rainEl) rainEl.textContent = `${w.precipitation} mm`;
+
+  const tabBadge = document.getElementById('modal-tab-temp-badge');
+  if (tabBadge) tabBadge.textContent = `${Math.round(w.temperature)}°`;
+
+  // Mini 3-Day Forecast Strip in modal
+  const strip = document.getElementById('modal-weather-forecast-strip');
+  if (strip && w.dailyForecast && w.dailyForecast.length > 0) {
+    const daysToShow = w.dailyForecast.slice(1, 4); // Next 3 days
+    strip.innerHTML = daysToShow
+      .map((d, idx) => {
+        const dayLabel = idx === 0 ? 'Besok' : idx === 1 ? 'Lusa' : 'H+3';
+        return `
+          <div class="p-1.5 rounded-lg bg-slate-950/60 border border-slate-800">
+            <span class="text-[9px] text-slate-400 block">${dayLabel}</span>
+            <span class="text-base my-0.5 block">${d.icon}</span>
+            <span class="font-mono text-white font-bold block">${d.tempMax}° / ${d.tempMin}°</span>
+          </div>
+        `;
+      })
+      .join('');
+  }
+}
+
+// Open Dedicated Weather Detail Modal
+function openWeatherDetailModal(regionName) {
+  const modal = document.getElementById('weather-detail-modal');
+  if (!modal) return;
+
+  const w = window.webgis.weatherData[regionName];
+  if (!w) return;
+
+  window.webgis.selectedWeatherRegion = regionName;
+
+  const info = NTT_REGIONS_INFO[regionName] || {};
+
+  document.getElementById('wd-modal-name').textContent = regionName;
+  document.getElementById('wd-modal-capital').textContent = w.ibuKota;
+  document.getElementById('wd-modal-island').textContent = info.pulau || 'Provinsi NTT';
+
+  document.getElementById('wd-modal-icon-hero').textContent = w.weatherIcon;
+  document.getElementById('wd-modal-temp-hero').textContent = w.temperature;
+  document.getElementById('wd-modal-desc-hero').textContent = w.weatherText;
+  document.getElementById('wd-modal-feels-hero').textContent = `${w.feelsLike}°C`;
+
+  document.getElementById('wd-modal-humidity').textContent = `${w.humidity}%`;
+  document.getElementById('wd-modal-wind').textContent = `${w.windSpeedKmH} km/j`;
+  document.getElementById('wd-modal-wind-dir').textContent = w.windDirectionText;
+  document.getElementById('wd-modal-rain').textContent = `${w.precipitation} mm`;
+  document.getElementById('wd-modal-dir-deg').textContent = `${w.windDirectionDeg}°`;
+
+  // Daily min / max hero
+  if (w.dailyForecast && w.dailyForecast.length > 0) {
+    const todayForecast = w.dailyForecast[0];
+    document.getElementById('wd-modal-min-hero').textContent = `${todayForecast.tempMin || Math.round(w.temperature - 5)}°C`;
+    document.getElementById('wd-modal-max-hero').textContent = `${todayForecast.tempMax || Math.round(w.temperature + 3)}°C`;
+  }
+
+  // 5-Day Daily Outlook List
+  const dailyContainer = document.getElementById('wd-modal-daily-list');
+  if (dailyContainer && w.dailyForecast) {
+    dailyContainer.innerHTML = w.dailyForecast
+      .map((d, i) => {
+        const dateObj = new Date(d.date);
+        const dayName = i === 0 ? 'Hari Ini' : dateObj.toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short' });
+
+        return `
+          <div class="p-2 rounded-xl bg-slate-800/50 border border-slate-700/50 flex items-center justify-between text-xs">
+            <div class="flex items-center gap-2.5 w-36">
+              <span class="text-lg">${d.icon}</span>
+              <div>
+                <span class="font-semibold text-slate-200 block text-[11px]">${dayName}</span>
+                <span class="text-[9px] text-slate-400 block">${d.weatherDesc}</span>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2 text-[10px] text-slate-400 font-mono">
+              <span title="Peluang Hujan"><i class="fas fa-umbrella text-sky-400 mr-1"></i>${d.precipProb}%</span>
+              ${d.windMax ? `<span class="hidden sm:inline" title="Kecepatan Angin Maksimal"><i class="fas fa-wind text-teal-400 mr-1"></i>${d.windMax} km/j</span>` : ''}
+            </div>
+
+            <div class="font-mono text-right">
+              <span class="text-emerald-400 font-bold text-xs">${d.tempMax}°</span>
+              <span class="text-slate-500 text-[10px] mx-1">/</span>
+              <span class="text-sky-300 text-[11px]">${d.tempMin}°C</span>
+            </div>
+          </div>
+        `;
+      })
+      .join('');
+  }
+
+  // Focus Button
+  const focusBtn = document.getElementById('btn-focus-from-weather');
+  if (focusBtn) {
+    focusBtn.onclick = () => {
+      closeWeatherDetailModal();
+      const feature = window.webgis.features.find((f) => f.get('WADMKK') === regionName);
+      if (feature) {
+        selectAndFocusFeature(feature);
+      }
+    };
+  }
+
+  modal.classList.remove('hidden');
+}
+
+function closeWeatherDetailModal() {
+  const modal = document.getElementById('weather-detail-modal');
+  if (modal) modal.classList.add('hidden');
+}
+
+function copyWeatherInfo() {
+  const regionName = window.webgis.selectedWeatherRegion;
+  if (!regionName) return;
+  const w = window.webgis.weatherData[regionName];
+  if (!w) return;
+
+  const text = `Kondisi Cuaca Terkini ${regionName} (${w.ibuKota}):\nSuhu: ${w.temperature}°C (Terasa ${w.feelsLike}°C)\nKondisi: ${w.weatherText}\nKelembapan: ${w.humidity}%\nAngin: ${w.windSpeedKmH} km/j (${w.windDirectionText})\nCurah Hujan: ${w.precipitation} mm\nSumber: Open-Meteo & BMKG Grid Geospatial`;
+
+  navigator.clipboard.writeText(text);
+  showToast('Tersalin!', `Informasi cuaca ${regionName} berhasil disalin ke clipboard.`, 'success', 'check-circle');
+}
+
+function openWeatherTab() {
+  const tabBtn = document.querySelector('.sidebar-tab-btn[data-tab="weather"]');
+  if (tabBtn) tabBtn.click();
+
+  // If sidebar closed on mobile, open it
+  const sidebar = document.getElementById('sidebar-drawer');
+  if (sidebar && sidebar.classList.contains('-translate-x-full')) {
+    const toggleBtn = document.getElementById('btn-toggle-sidebar');
+    if (toggleBtn) toggleBtn.click();
+  }
+}
+
+function refreshWeatherData(force = true) {
+  fetchWeatherData(force);
+}
+
+// Global attachments
+window.initWeatherSystem = initWeatherSystem;
+window.fetchWeatherData = fetchWeatherData;
+window.renderWeatherMapOverlays = renderWeatherMapOverlays;
+window.toggleWeatherMapLayer = toggleWeatherMapLayer;
+window.onWeatherLabelModeChange = onWeatherLabelModeChange;
+window.renderWeatherSidebarTab = renderWeatherSidebarTab;
+window.onWeatherCardClick = onWeatherCardClick;
+window.openWeatherDetailModal = openWeatherDetailModal;
+window.closeWeatherDetailModal = closeWeatherDetailModal;
+window.copyWeatherInfo = copyWeatherInfo;
+window.openWeatherTab = openWeatherTab;
+window.refreshWeatherData = refreshWeatherData;
+window.renderAreaBarChart = renderAreaBarChart;
+
